@@ -39,10 +39,14 @@ namespace web_server
         void cleanupNetworking();
         socket_t createServerSocket();
         void handleClient(socket_t client_socket);
-        std::string parseRequest(const std::string &request);
+        std::pair<std::string, std::string> parseRequest(const std::string &request);
+        // std::string parseRequest(const std::string &request);
         std::string getMimeType(const std::string &path);
         std::string readFile(const std::string &path);
         std::string generateDirectoryListing(const std::string &dir_path, const std::string &relative_path);
+        std::string generateUploadForm(const std::string &relative_path);
+        std::pair<std::string, std::string> parseMultipartFormData(const std::string &request, const std::string &boundary);
+        bool saveUploadedFile(const std::string &filename, const std::string &content, const std::string &destination_dir);
         void sendResponse(socket_t client_socket, const std::string &status,
                           const std::string &content_type, const std::string &content);
     };
