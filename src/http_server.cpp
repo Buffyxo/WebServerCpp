@@ -258,7 +258,9 @@ namespace web_server
                 std::cerr << "Failed to accept connection\n";
                 continue;
             }
-            handleClient(client_socket);
+            // handleClient(client_socket);
+            std::thread client_thread(&HttpServer::handleClient, this, client_socket);
+            client_thread.detach();
         }
     }
 

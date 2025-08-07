@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <filesystem>
+#include <thread>
 
 #ifdef _WIN32
 #include <winsock2.h>
