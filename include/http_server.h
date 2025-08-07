@@ -41,6 +41,7 @@ namespace web_server
         std::string parseRequest(const std::string &request);
         std::string getMimeType(const std::string &path);
         std::string readFile(const std::string &path);
+        std::string generateDirectoryListing(const std::string &dir_path, const std::string &relative_path);
         void sendResponse(socket_t client_socket, const std::string &status,
                           const std::string &content_type, const std::string &content);
     };

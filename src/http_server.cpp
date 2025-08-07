@@ -144,6 +144,35 @@ namespace web_server
         return content.str();
     }
 
+    std::string HttpServer::generateDirectoryListing(const std::string &dir_path, const std::string &relative_path)
+    {
+        std::ostringstream html;
+        html << "<!DOCTYPE html><html><head><title>Directory Listing</title></head><body>";
+        html << "<h1>Directory: " << relative_path << "</h1><ul>";
+        try
+        {
+            for (const auto &entry : std::filesystem::directory_iterator(dir_path))
+            {
+                std::string name = entry.path().filename().string();
+                std::string link = relative_path + (relative_path == "/" ? "" : "/") + name;
+                if (std::filesystem::is_directory(entry))
+                {
+                    html << "<li><a href=\"" << link << "/\">" << name << "/</a></li>";
+                }
+                else
+                {
+                    html << "<li><a href=\"" << link << "\">" << name << "</a></li>";
+                }
+            }
+        }
+        catch (const std::filesystem::filesystem_error &e)
+        {
+            html << "<li>Error reading directory: " << e.what() << "</li>";
+        }
+        html << "</ul></body></html>";
+        return html.str();
+    }
+
     void HttpServer::sendResponse(socket_t client_socket, const std::string &status,
                                   const std::string &content_type, const std::string &content)
     {
@@ -177,8 +206,18 @@ namespace web_server
             return;
         }
 
-        std::string file_path = web_root_ + (path == "/" ? "/index.html" : path);
-        std::filesystem::path canonical_path = std::filesystem::canonical(web_root_) / path.substr(1);
+        std::string file_path = web_root_ + (path == "/" ? "" : path);
+        std::filesystem::path canonical_path;
+        try
+        {
+            canonical_path = std::filesystem::canonical(web_root_) / (path == "/" ? "" : path.substr(1));
+        }
+        catch (const std::filesystem::filesystem_error &)
+        {
+            sendResponse(client_socket, "404 Not Found", "text/plain", "Path not found");
+            CLOSE_SOCKET(client_socket);
+            return;
+        }
         if (!canonical_path.string().starts_with(std::filesystem::canonical(web_root_).string()))
         {
             sendResponse(client_socket, "403 Forbidden", "text/plain", "Access denied");
@@ -186,15 +225,23 @@ namespace web_server
             return;
         }
 
-        std::string content = readFile(file_path);
-        if (content.empty())
+        if (std::filesystem::is_directory(file_path))
         {
-            sendResponse(client_socket, "404 Not Found", "text/plain", "File not found");
+            std::string listing = generateDirectoryListing(file_path, path);
+            sendResponse(client_socket, "200 OK", "text/html", listing);
         }
         else
         {
-            std::string mime_type = getMimeType(file_path);
-            sendResponse(client_socket, "200 OK", mime_type, content);
+            std::string content = readFile(file_path);
+            if (content.empty())
+            {
+                sendResponse(client_socket, "404 Not Found", "text/plain", "File not found");
+            }
+            else
+            {
+                std::string mime_type = getMimeType(file_path);
+                sendResponse(client_socket, "200 OK", mime_type, content);
+            }
         }
         CLOSE_SOCKET(client_socket);
     }
@@ -215,4 +262,4 @@ namespace web_server
         }
     }
 
-}
+} // namespace web_server
