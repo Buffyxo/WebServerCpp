@@ -192,61 +192,89 @@ namespace web_server
 
     std::pair<std::string, std::string> HttpServer::parseMultipartFormData(const std::string &request, const std::string &boundary)
     {
+        std::cout << "Parsing multipart form-data with boundary: " << boundary << "\n";
         std::string delimiter = "--" + boundary;
         std::string end_delimiter = delimiter + "--";
         size_t start = request.find(delimiter);
         if (start == std::string::npos)
         {
+            std::cout << "Failed to find start delimiter: " << delimiter << "\n";
             return {"", ""};
         }
+        size_t part_start = start + delimiter.length() + 2; // Skip \r\n after delimiter
+        size_t next_delimiter = request.find(delimiter, part_start);
         size_t end = request.find(end_delimiter, start);
         if (end == std::string::npos)
         {
             end = request.length();
+            std::cout << "No end delimiter found, using request length: " << end << "\n";
+        }
+        if (next_delimiter != std::string::npos && next_delimiter < end)
+        {
+            end = next_delimiter;
         }
 
-        std::string part = request.substr(start + delimiter.length(), end - start - delimiter.length());
+        std::string part = request.substr(part_start, end - part_start - 2); // Remove trailing \r\n
         std::regex disposition_regex(R"delim(Content-Disposition:.*filename="([^"]+)")delim");
         std::smatch match;
         if (!std::regex_search(part, match, disposition_regex))
         {
+            std::cout << "Failed to find filename in Content-Disposition\n";
             return {"", ""};
         }
         std::string filename = match[1].str();
+        std::cout << "Extracted filename: " << filename << "\n";
 
-        size_t content_start = part.find("\r\n\r\n") + 4;
-        if (content_start == std::string::npos || content_start >= part.length())
+        size_t content_start = part.find("\r\n\r\n");
+        if (content_start == std::string::npos)
         {
+            std::cout << "Failed to find content start after headers\n";
             return {"", ""};
         }
+        content_start += 4; // Skip \r\n\r\n
         std::string content = part.substr(content_start);
+        std::cout << "Extracted content length: " << content.length() << " bytes\n";
         return {filename, content};
     }
 
     bool HttpServer::saveUploadedFile(const std::string &filename, const std::string &content, const std::string &destination_dir)
     {
+        std::cout << "Attempting to save file: " << filename << " to " << destination_dir << "\n";
         if (filename.empty() || filename.find("..") != std::string::npos || filename.find('/') != std::string::npos || filename.find('\\') != std::string::npos)
         {
+            std::cout << "Invalid filename: " << filename << "\n";
             return false;
         }
         std::filesystem::path file_path = std::filesystem::path(destination_dir) / filename;
+        std::cout << "Constructed file path: " << file_path.string() << "\n";
         try
         {
+            std::filesystem::create_directories(destination_dir);
             std::filesystem::path canonical_path = std::filesystem::canonical(destination_dir) / filename;
+            std::cout << "Canonical path: " << canonical_path.string() << "\n";
             if (!canonical_path.string().starts_with(std::filesystem::canonical(web_root_).string()))
             {
+                std::cout << "Directory traversal detected: " << canonical_path.string() << " not in " << web_root_ << "\n";
                 return false;
             }
             std::ofstream file(file_path, std::ios::binary);
             if (!file)
             {
+                std::cout << "Failed to open file for writing: " << file_path.string() << "\n";
                 return false;
             }
             file.write(content.c_str(), content.length());
-            return file.good();
+            if (!file.good())
+            {
+                std::cout << "Failed to write content to file: " << file_path.string() << "\n";
+                return false;
+            }
+            std::cout << "Successfully wrote file: " << file_path.string() << ", size: " << content.length() << " bytes\n";
+            return true;
         }
-        catch (const std::filesystem::filesystem_error &)
+        catch (const std::filesystem::filesystem_error &e)
         {
+            std::cout << "Filesystem error: " << e.what() << "\n";
             return false;
         }
     }
@@ -268,20 +296,68 @@ namespace web_server
 
     void HttpServer::handleClient(socket_t client_socket)
     {
-        char buffer[8192] = {0};
-        int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_received <= 0)
+
+        char buffer[32768] = {0}; // Increased to 32KB
+        std::string request;
+        size_t total_bytes = 0;
+
+        // Read headers to find Content-Length
+        std::string headers;
+        while (true)
         {
-            CLOSE_SOCKET(client_socket);
-            return;
+            int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+            if (bytes_received <= 0)
+            {
+                std::cout << "Failed to receive data from client\n";
+                CLOSE_SOCKET(client_socket);
+                return;
+            }
+            buffer[bytes_received] = '\0';
+            headers += std::string(buffer, bytes_received);
+            total_bytes += bytes_received;
+            if (headers.find("\r\n\r\n") != std::string::npos)
+            {
+                break;
+            }
         }
-        std::string request(buffer, bytes_received);
+
+        // Extract Content-Length
+        size_t content_length = 0;
+        std::regex content_length_regex(R"(Content-Length: (\d+))");
+        std::smatch match;
+        if (std::regex_search(headers, match, content_length_regex))
+        {
+            content_length = std::stoul(match[1].str());
+            std::cout << "Content-Length: " << content_length << " bytes\n";
+        }
+
+        // Read remaining body based on Content-Length
+        request = headers;
+        size_t body_received = headers.length() - (headers.find("\r\n\r\n") + 4);
+        while (body_received < content_length)
+        {
+            int bytes_received = recv(client_socket, buffer, std::min<size_t>(sizeof(buffer) - 1, content_length - body_received), 0);
+            if (bytes_received <= 0)
+            {
+                std::cout << "Failed to receive full body, received: " << body_received << "/" << content_length << "\n";
+                CLOSE_SOCKET(client_socket);
+                return;
+            }
+            buffer[bytes_received] = '\0';
+            request += std::string(buffer, bytes_received);
+            body_received += bytes_received;
+            total_bytes += bytes_received;
+        }
+        std::cout << "Total request size received: " << total_bytes << " bytes\n";
+
         auto [path, method_query] = parseRequest(request);
         std::string method = method_query.substr(0, method_query.find('?'));
         std::string query = method_query.find('?') != std::string::npos ? method_query.substr(method_query.find('?')) : "";
+        std::cout << "Handling request: " << method << " " << path << " " << query << "\n";
 
         if (method.empty())
         {
+            std::cout << "Unsupported method\n";
             sendResponse(client_socket, "400 Bad Request", "text/plain", "Only GET and POST requests are supported");
             CLOSE_SOCKET(client_socket);
             return;
@@ -291,23 +367,26 @@ namespace web_server
         {
             std::string destination_path = "/";
             std::regex path_regex(R"(\?path=([^ \r\n]*))");
-            std::smatch match;
             if (std::regex_search(query, match, path_regex))
             {
                 destination_path = match[1].str();
+                std::cout << "Upload destination path: " << destination_path << "\n";
             }
             std::string file_path = web_root_ + (destination_path == "/" ? "" : destination_path);
+            std::cout << "Upload file path: " << file_path << "\n";
             try
             {
                 std::filesystem::path canonical_path = std::filesystem::canonical(web_root_) / (destination_path == "/" ? "" : destination_path.substr(1));
                 if (!canonical_path.string().starts_with(std::filesystem::canonical(web_root_).string()))
                 {
+                    std::cout << "Directory traversal detected in upload path: " << canonical_path.string() << "\n";
                     sendResponse(client_socket, "403 Forbidden", "text/plain", "Access denied");
                     CLOSE_SOCKET(client_socket);
                     return;
                 }
                 if (!std::filesystem::is_directory(file_path))
                 {
+                    std::cout << "Upload destination is not a directory: " << file_path << "\n";
                     sendResponse(client_socket, "400 Bad Request", "text/plain", "Upload destination must be a directory");
                     CLOSE_SOCKET(client_socket);
                     return;
@@ -318,20 +397,24 @@ namespace web_server
                     auto [filename, content] = parseMultipartFormData(request, match[1].str());
                     if (filename.empty() || !saveUploadedFile(filename, content, file_path))
                     {
+                        std::cout << "Upload failed: filename=" << filename << ", content_length=" << content.length() << "\n";
                         sendResponse(client_socket, "400 Bad Request", "text/plain", "Failed to upload file");
                     }
                     else
                     {
+                        std::cout << "Upload succeeded: " << filename << " to " << file_path << "\n";
                         sendResponse(client_socket, "200 OK", "text/plain", "File uploaded successfully");
                     }
                 }
                 else
                 {
+                    std::cout << "Invalid multipart/form-data in POST request\n";
                     sendResponse(client_socket, "400 Bad Request", "text/plain", "Invalid multipart/form-data");
                 }
             }
-            catch (const std::filesystem::filesystem_error &)
+            catch (const std::filesystem::filesystem_error &e)
             {
+                std::cout << "Filesystem error in upload: " << e.what() << "\n";
                 sendResponse(client_socket, "404 Not Found", "text/plain", "Upload path not found");
             }
             CLOSE_SOCKET(client_socket);
