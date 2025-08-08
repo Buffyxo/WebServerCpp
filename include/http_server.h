@@ -40,9 +40,9 @@ namespace web_server
         socket_t createServerSocket();
         void handleClient(socket_t client_socket);
         std::pair<std::string, std::string> parseRequest(const std::string &request);
-        // std::string parseRequest(const std::string &request);
         std::string getMimeType(const std::string &path);
         std::string readFile(const std::string &path);
+        std::string generateDirectoryTree(const std::string &dir_path, const std::string &relative_path, int depth);
         std::string generateDirectoryListing(const std::string &dir_path, const std::string &relative_path);
         std::string generateUploadForm(const std::string &relative_path);
         std::pair<std::string, std::string> parseMultipartFormData(const std::string &request, const std::string &boundary);

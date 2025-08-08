@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <fstream>
 #include <regex>
+#include <algorithm>
 
 namespace web_server
 {
@@ -147,62 +148,156 @@ namespace web_server
         return content.str();
     }
 
-    std::string HttpServer::generateDirectoryListing(const std::string &dir_path, const std::string &relative_path)
+    // Comparison function for sorting directory entries
+    bool comparePaths(const std::filesystem::directory_entry &a, const std::filesystem::directory_entry &b)
+    {
+        return a.path().filename().string() < b.path().filename().string();
+    }
+
+    std::string HttpServer::generateDirectoryTree(const std::string &dir_path, const std::string &relative_path, int depth)
     {
         std::ostringstream html;
-        html << "<!DOCTYPE html><html><head><title>Directory Listing</title></head><body>";
-        html << "<h1>Directory: " << relative_path << "</h1><ul>";
-        html << "<form action=\"/upload?path=" << relative_path << "\" method=\"post\" enctype=\"multipart/form-data\">";
-        html << "<input type=\"file\" name=\"file\"><input type=\"submit\" value=\"Upload\"></form>";
-        html << "<ul>";
         try
         {
+            std::vector<std::filesystem::directory_entry> directories;
+            std::vector<std::filesystem::directory_entry> files;
+
+            // Separate directories and files for sorting
             for (const auto &entry : std::filesystem::directory_iterator(dir_path))
             {
-                std::string name = entry.path().filename().string();
-                std::string link = relative_path + (relative_path == "/" ? "" : "/") + name;
                 if (std::filesystem::is_directory(entry))
                 {
-                    html << "<li><a href=\"" << link << "/\">" << name << "/</a></li>";
+                    directories.push_back(entry);
                 }
                 else
                 {
-                    html << "<li><a href=\"" << link << "\">" << name << "</a></li>";
+                    files.push_back(entry);
                 }
+            }
+
+            // Sort directories and files alphabetically
+            std::sort(directories.begin(), directories.end(), comparePaths);
+            std::sort(files.begin(), files.end(), comparePaths);
+
+            // Process directories
+            for (const auto &entry : directories)
+            {
+                std::string name = entry.path().filename().string();
+                std::string link = relative_path + (relative_path == "/" ? "" : "/") + name;
+                std::string tree_id = "tree-" + relative_path + "/" + name;
+                std::replace(tree_id.begin(), tree_id.end(), '/', '_'); // Replace / with _ for valid ID
+                html << "<li class='directory'>";
+                html << "<span class='toggle' onclick=\"toggleTree('" << tree_id << "')\">&#9654;</span> "; // Right arrow
+                html << "<a href='" << link << "/'>" << name << "/</a>";
+                html << "<ul id='" << tree_id << "' style='display: none;'>";
+                html << generateDirectoryTree(entry.path().string(), link, depth + 1);
+                html << "</ul></li>";
+            }
+
+            // Process files
+            for (const auto &entry : files)
+            {
+                std::string name = entry.path().filename().string();
+                std::string link = relative_path + (relative_path == "/" ? "" : "/") + name;
+                html << "<li class='file'><a href='" << link << "'>" << name << "</a></li>";
             }
         }
         catch (const std::filesystem::filesystem_error &e)
         {
             html << "<li>Error reading directory: " << e.what() << "</li>";
         }
-        html << "</ul></body></html>";
-        return html.str();
+        std::string result = html.str();
+
+        return result;
+    }
+
+    std::string HttpServer::generateDirectoryListing(const std::string &dir_path, const std::string &relative_path)
+    {
+        std::string template_path = web_root_ + "/templates/tree_template.html";
+        std::string html = readFile(template_path);
+        if (html.empty())
+        {
+            std::cout << "Failed to load template, using fallback\n";
+            html = "<!DOCTYPE html><html><head><title>Directory Listing</title></head><body>"
+                   "<h1>Directory: {{RELATIVE_PATH}}</h1>"
+                   "<form action='/upload?path={{RELATIVE_PATH}}' method='post' enctype='multipart/form-data'>"
+                   "<input type='file' name='file'><input type='submit' value='Upload'>"
+                   "</form><ul>{{TREE_CONTENT}}</ul></body></html>";
+        }
+
+        std::string clean_relative_path = relative_path;
+
+        if (!clean_relative_path.empty() && clean_relative_path.back() == '}')
+        {
+            clean_relative_path = clean_relative_path.substr(0, clean_relative_path.length() - 1);
+        }
+
+        std::string tree_content = generateDirectoryTree(dir_path, relative_path, 0);
+        if (!tree_content.empty() && tree_content.back() == '}')
+        {
+            tree_content = tree_content.substr(0, tree_content.length() - 1);
+        }
+
+        // Replace placeholders
+        std::string result = html;
+        size_t pos;
+        while ((pos = result.find("{{RELATIVE_PATH}}")) != std::string::npos)
+        {
+            result.replace(pos, 17, clean_relative_path);
+        }
+        while ((pos = result.find("{{TREE_CONTENT}}")) != std::string::npos)
+        {
+            result.replace(pos, 16, tree_content);
+        }
+
+        return result;
     }
 
     std::string HttpServer::generateUploadForm(const std::string &relative_path)
     {
-        std::ostringstream html;
-        html << "<!DOCTYPE html><html><head><title>Upload File</title></head><body>";
-        html << "<h1>Upload to " << relative_path << "</h1>";
-        html << "<form action=\"/upload?path=" << relative_path << "\" method=\"post\" enctype=\"multipart/form-data\">";
-        html << "<input type=\"file\" name=\"file\"><input type=\"submit\" value=\"Upload\">";
-        html << "</form></body></html>";
-        return html.str();
+        std::string template_path = web_root_ + "/templates/upload_template.html";
+        std::string html = readFile(template_path);
+        if (html.empty())
+        {
+            std::cout << "Failed to load upload template, using fallback\n";
+            html = "<!DOCTYPE html><html><head><title>Upload File</title></head><body>"
+                   "<h1>Upload to {{RELATIVE_PATH}}</h1>"
+                   "<form action='/upload?path={{RELATIVE_PATH}}' method='post' enctype='multipart/form-data'>"
+                   "<input type='file' name='file'><input type='submit' value='Upload'>"
+                   "</form></body></html>";
+        }
+
+        std::string clean_relative_path = relative_path;
+        if (clean_relative_path.empty() || clean_relative_path == "/")
+        {
+            clean_relative_path = "/";
+        }
+
+        std::string result = html;
+        size_t pos;
+        while ((pos = result.find("{{RELATIVE_PATH}}")) != std::string::npos)
+        {
+            result.replace(pos, 17, clean_relative_path);
+        }
+
+        std::cout << "Upload form HTML size: " << result.size() << " bytes\n";
+        return result;
     }
 
     std::pair<std::string, std::string> HttpServer::parseMultipartFormData(const std::string &request, const std::string &boundary)
     {
         std::cout << "Parsing multipart form-data with boundary: " << boundary << "\n";
-        std::string delimiter = "--" + boundary;
-        std::string end_delimiter = delimiter + "--";
-        size_t start = request.find(delimiter);
+        std::string delimiter = "--" + boundary;      // "--abc123"
+        std::string end_delimiter = delimiter + "--"; // "--abc123--"
+
+        size_t start = request.find(delimiter); // Finds the first "--abc123--"
         if (start == std::string::npos)
         {
             std::cout << "Failed to find start delimiter: " << delimiter << "\n";
             return {"", ""};
         }
-        size_t part_start = start + delimiter.length() + 2; // Skip \r\n after delimiter
-        size_t next_delimiter = request.find(delimiter, part_start);
+        size_t part_start = start + delimiter.length() + 2;          // Skip "--abc123\r\n" (delimeter + CRLF)
+        size_t next_delimiter = request.find(delimiter, part_start); // not necessary but useful for other use cases
         size_t end = request.find(end_delimiter, start);
         if (end == std::string::npos)
         {
@@ -214,25 +309,28 @@ namespace web_server
             end = next_delimiter;
         }
 
-        std::string part = request.substr(part_start, end - part_start - 2); // Remove trailing \r\n
+        std::string part = request.substr(part_start, end - part_start - 2); // Remove trailing \r\n and extracts a single part
+
+        // Extract filename from header in the part
         std::regex disposition_regex(R"delim(Content-Disposition:.*filename="([^"]+)")delim");
         std::smatch match;
         if (!std::regex_search(part, match, disposition_regex))
         {
             std::cout << "Failed to find filename in Content-Disposition\n";
-            return {"", ""};
+            return {"", ""}; // if no filename is found
         }
         std::string filename = match[1].str();
         std::cout << "Extracted filename: " << filename << "\n";
 
+        // Find where headers end and content starts in the part
         size_t content_start = part.find("\r\n\r\n");
         if (content_start == std::string::npos)
         {
             std::cout << "Failed to find content start after headers\n";
             return {"", ""};
         }
-        content_start += 4; // Skip \r\n\r\n
-        std::string content = part.substr(content_start);
+        content_start += 4;                               // Skip \r\n\r\n (blank line)
+        std::string content = part.substr(content_start); // Extract the file's binary data as a a string
         std::cout << "Extracted content length: " << content.length() << " bytes\n";
         return {filename, content};
     }
@@ -284,7 +382,7 @@ namespace web_server
     {
         std::ostringstream response;
         response << "HTTP/1.1 " << status << "\r\n";
-        response << "Content-Type: " << content_type << "\r\n";
+        response << "Content-Type: " << content_type << "; charset=UTF-8\r\n";
         response << "Content-Length: " << content.length() << "\r\n";
         response << "Connection: close\r\n";
         response << "\r\n";
@@ -348,12 +446,10 @@ namespace web_server
             body_received += bytes_received;
             total_bytes += bytes_received;
         }
-        std::cout << "Total request size received: " << total_bytes << " bytes\n";
 
         auto [path, method_query] = parseRequest(request);
         std::string method = method_query.substr(0, method_query.find('?'));
         std::string query = method_query.find('?') != std::string::npos ? method_query.substr(method_query.find('?')) : "";
-        std::cout << "Handling request: " << method << " " << path << " " << query << "\n";
 
         if (method.empty())
         {
@@ -440,6 +536,12 @@ namespace web_server
         std::filesystem::path canonical_path;
         try
         {
+            if (path.find("/templates/") == 0)
+            {
+                sendResponse(client_socket, "403 Forbidden", "text/plain", "Access to templates directory is forbidden");
+                CLOSE_SOCKET(client_socket);
+                return;
+            }
             canonical_path = std::filesystem::canonical(web_root_) / (path == "/" ? "" : path.substr(1));
         }
         catch (const std::filesystem::filesystem_error &)
