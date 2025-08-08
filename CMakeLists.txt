@@ -21,6 +21,9 @@ file(COPY ${CMAKE_SOURCE_DIR}/web DESTINATION ${CMAKE_BINARY_DIR})
 # Link Ws2_32 on Windows
 if(WIN32)
     target_link_libraries(web_server PRIVATE Ws2_32)
+else()
+    find_package(Threads REQUIRED)
+    target_link_libraries(web_server PRIVATE Threads::Threads)
 endif()
 
 # Set output directory

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Directory Listing</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f9;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .upload-form {
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li.directory,
+        li.file {
+            padding: 5px 0;
+            margin-left: 20px;
+        }
+
+        .directory .toggle {
+            cursor: pointer;
+            margin-right: 5px;
+        }
+
+        .directory a,
+        .file a {
+            text-decoration: none;
+            color: #007bff;
+        }
+
+        .directory a:hover,
+        .file a:hover {
+            text-decoration: underline;
+        }
+
+        .directory::before {
+            content: '📁 ';
+        }
+
+        .file::before {
+            content: '📄 ';
+        }
+
+        input[type=file],
+        input[type=submit] {
+            padding: 5px;
+            margin-right: 10px;
+        }
+
+        input[type=submit] {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        input[type=submit]:hover {
+            background: #0056b3;
+        }
+    </style>
+    <script>
+        function toggleTree(id) {
+            const ul = document.getElementById(id);
+            if (!ul) return;
+
+            const li = ul.parentElement;
+            const toggle = li.querySelector('.toggle');
+            const arrow = toggle.querySelector('.arrow');
+
+            const isHidden = getComputedStyle(ul).display === 'none';
+            if (isHidden) {
+                ul.style.display = 'block';
+                arrow.innerHTML = '&#9660;'; // Down arrow
+            } else {
+                ul.style.display = 'none';
+                arrow.innerHTML = '&#9654;'; // Right arrow 
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Directory: {{RELATIVE_PATH}}</h1>
+        <div class="upload-form">
+            <form action="/upload?path={{RELATIVE_PATH}}" method="post" enctype="multipart/form-data">
+                <input type="file" name="file"><input type="submit" value="Upload">
+            </form>
+        </div>
+        <ul>{{TREE_CONTENT}}</ul>
+    </div>
+</body>
+
+</html>

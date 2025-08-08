@@ -18,3 +18,4 @@ Thumbs.db
 *.tmp
 *.swp
 *.bak
+.DS_Store

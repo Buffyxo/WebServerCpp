@@ -187,8 +187,10 @@ namespace web_server
                 std::string tree_id = "tree-" + relative_path + "/" + name;
                 std::replace(tree_id.begin(), tree_id.end(), '/', '_'); // Replace / with _ for valid ID
                 html << "<li class='directory'>";
-                html << "<span class='toggle' onclick=\"toggleTree('" << tree_id << "')\">&#9654;</span> "; // Right arrow
-                html << "<a href='" << link << "/'>" << name << "/</a>";
+                html << "<span class='toggle' onclick=\"toggleTree('" << tree_id << "')\">"
+                     << "<span class='arrow'>&#9654;</span> "
+                     << "<a href='" << link << "/' onclick=\"event.stopPropagation();\">" << name << "/</a>"
+                     << "</span>";
                 html << "<ul id='" << tree_id << "' style='display: none;'>";
                 html << generateDirectoryTree(entry.path().string(), link, depth + 1);
                 html << "</ul></li>";
